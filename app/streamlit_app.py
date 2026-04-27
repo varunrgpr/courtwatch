@@ -49,7 +49,15 @@ def get_rows() -> list[dict]:
     response = _get_s3_client().get_object(Bucket=bucket, Key=key)
     body = response["Body"].read().decode("utf-8")
     rows = list(csv.DictReader(io.StringIO(body)))
-    return [dict(row) for row in rows]
+    normalized: list[dict] = []
+    for row in rows:
+        payload = dict(row)
+        try:
+            payload["segments"] = int(payload.get("segments") or 1)
+        except (TypeError, ValueError):
+            payload["segments"] = 1
+        normalized.append(payload)
+    return normalized
 
 
 def format_timestamp(value: str) -> str:
