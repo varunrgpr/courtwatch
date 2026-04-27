@@ -354,7 +354,7 @@ else:
 last_updated = max((row.get("observed_at") for row in filtered if row.get("observed_at")), default="—")
 report_date = filtered[0]["date"] if filtered else "—"
 
-st.metric("Last updated", format_timestamp(last_updated))
+st.caption(f"Last refreshed: {format_timestamp(last_updated)}")
 
 grouped = group_by_park_and_court(visible_rows)
 
