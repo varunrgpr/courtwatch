@@ -321,10 +321,6 @@ st.markdown(
 
 st.title("Free Court Watcher")
 st.caption("Daily playable court availability for selected Arlington courts")
-st.markdown(
-    '<div class="cw-top-note">Merged continuous windows are shown by default so each court reads like one clean row.</div>',
-    unsafe_allow_html=True,
-)
 
 try:
     rows = get_rows()
