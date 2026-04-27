@@ -1,44 +1,55 @@
+import csv
+import io
 from collections import defaultdict
 from datetime import datetime
-import os
-import time
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 import streamlit as st
 
 from app.schedule_context import SCHEDULE_CONTEXT
-from backend.services.reporting import load_latest_windows
 
 st.set_page_config(page_title="Free Court Watcher", layout="wide")
 
-_BUCKET = "court-watch-data-arlington"
-_KEY = "court_watch.db"
-_DB_PATH = "./court_watch.db"
+_DEFAULT_BUCKET = "court-watch-data-arlington"
+_DEFAULT_KEY = "availability.csv"
+_DEFAULT_REGION = "us-west-2"
 _MAX_AGE_SECONDS = 300
 
 
-@st.cache_resource(ttl=_MAX_AGE_SECONDS)
-def _ensure_db() -> None:
-    needs_download = not os.path.exists(_DB_PATH) or (time.time() - os.path.getmtime(_DB_PATH)) > _MAX_AGE_SECONDS
-    if needs_download:
-        s3 = boto3.client(
-            "s3",
-            region_name="us-west-2",
-            aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
-            aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],
-        )
-        s3.download_file(_BUCKET, _KEY, _DB_PATH)
+def _get_secret(name: str, default: str | None = None) -> str | None:
+    return st.secrets[name] if name in st.secrets else default
 
 
-_ensure_db()
+def _get_s3_config() -> tuple[str, str, str]:
+    return (
+        _get_secret("S3_BUCKET", _DEFAULT_BUCKET),
+        _get_secret("S3_KEY", _DEFAULT_KEY),
+        _get_secret("AWS_DEFAULT_REGION", _DEFAULT_REGION),
+    )
+
+
+@st.cache_resource
+def _get_s3_client():
+    _, _, region = _get_s3_config()
+    return boto3.client(
+        "s3",
+        region_name=region,
+        aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],
+    )
 
 
 @st.cache_data(show_spinner=False, ttl=60)
 def get_rows() -> list[dict]:
     # The dashboard refreshes frequently enough that a short cache keeps the UI
     # snappy without making the data feel stale during manual refreshes.
-    return load_latest_windows(merged=True)
+    bucket, key, _ = _get_s3_config()
+    response = _get_s3_client().get_object(Bucket=bucket, Key=key)
+    body = response["Body"].read().decode("utf-8")
+    rows = list(csv.DictReader(io.StringIO(body)))
+    return [dict(row) for row in rows]
 
 
 def format_timestamp(value: str) -> str:
@@ -302,9 +313,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-rows = get_rows()
+try:
+    rows = get_rows()
+except (ClientError, BotoCoreError, KeyError) as exc:
+    bucket, key, _ = _get_s3_config()
+    st.error(f"Could not load dashboard data from s3://{bucket}/{key}.")
+    st.caption("Check your Streamlit secrets and confirm the latest CSV has been uploaded to S3.")
+    st.exception(exc)
+    st.stop()
+
 if not rows:
-    st.warning("No stored snapshot yet. Run a capture + ingest first.")
+    st.warning("No stored snapshot yet. Upload the latest availability CSV first.")
     st.stop()
 
 parks = sorted({row["park"] for row in rows if row.get("park")})
