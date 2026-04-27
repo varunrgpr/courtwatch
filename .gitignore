@@ -1,0 +1,31 @@
+# Database (downloaded from S3 at runtime)
+court_watch.db
+
+# Environment
+.env
+
+# Runtime data
+data/raw/
+data/logs/
+logs/
+tmp/
+
+# Build artifacts
+*.egg-info/
+__pycache__/
+*.py[cod]
+*.pyo
+.eggs/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# Virtual environments
+.venv/
+venv/
