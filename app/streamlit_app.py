@@ -352,15 +352,9 @@ else:
     visible_rows = playable_rows
 
 last_updated = max((row.get("observed_at") for row in filtered if row.get("observed_at")), default="—")
-open_count = len(playable_rows)
-playable_courts = len({(row.get("park"), row.get("court")) for row in playable_rows})
 report_date = filtered[0]["date"] if filtered else "—"
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Playable windows", open_count)
-col2.metric("Playable courts", playable_courts)
-col3.metric("Report date", report_date)
-col4.metric("Last updated", format_timestamp(last_updated))
+st.metric("Last updated", format_timestamp(last_updated))
 
 grouped = group_by_park_and_court(visible_rows)
 
