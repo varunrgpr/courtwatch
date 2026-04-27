@@ -1,7 +1,8 @@
 import csv
 import io
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -15,6 +16,7 @@ st.set_page_config(page_title="Free Court Watcher", layout="wide")
 _DEFAULT_BUCKET = "court-watch-data-arlington"
 _DEFAULT_KEY = "availability.csv"
 _DEFAULT_REGION = "us-west-2"
+_DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
 _MAX_AGE_SECONDS = 300
 
 
@@ -65,7 +67,10 @@ def format_timestamp(value: str) -> str:
         return "—"
     try:
         dt = datetime.fromisoformat(value)
-        return dt.strftime("%b %d, %I:%M %p")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone(_DISPLAY_TIMEZONE)
+        return local_dt.strftime("%b %d, %I:%M %p")
     except Exception:
         return value
 
