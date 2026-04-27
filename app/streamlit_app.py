@@ -3,7 +3,8 @@ from datetime import datetime
 import os
 import time
 
-import requests
+import boto3
+
 import streamlit as st
 
 from app.schedule_context import SCHEDULE_CONTEXT
@@ -11,7 +12,8 @@ from backend.services.reporting import load_latest_windows
 
 st.set_page_config(page_title="Free Court Watcher", layout="wide")
 
-_DB_URL = "https://court-watch-data-arlington.s3.us-west-2.amazonaws.com/court_watch.db"
+_BUCKET = "court-watch-data-arlington"
+_KEY = "court_watch.db"
 _DB_PATH = "./court_watch.db"
 _MAX_AGE_SECONDS = 300
 
@@ -20,10 +22,13 @@ _MAX_AGE_SECONDS = 300
 def _ensure_db() -> None:
     needs_download = not os.path.exists(_DB_PATH) or (time.time() - os.path.getmtime(_DB_PATH)) > _MAX_AGE_SECONDS
     if needs_download:
-        response = requests.get(_DB_URL, timeout=30)
-        response.raise_for_status()
-        with open(_DB_PATH, "wb") as f:
-            f.write(response.content)
+        s3 = boto3.client(
+            "s3",
+            region_name="us-west-2",
+            aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],
+        )
+        s3.download_file(_BUCKET, _KEY, _DB_PATH)
 
 
 _ensure_db()
