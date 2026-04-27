@@ -365,9 +365,10 @@ col4.metric("Last updated", format_timestamp(last_updated))
 grouped = group_by_park_and_court(visible_rows)
 
 st.subheader("Open windows by court")
-for park in selected_parks:
-    if park not in grouped:
-        continue
+visible_parks = [park for park in selected_parks if park in grouped]
+park_columns = st.columns(len(visible_parks)) if visible_parks else []
+
+for column, park in zip(park_columns, visible_parks):
     summary, day_notes = get_schedule_context(park, report_date)
     context_html = ""
     if summary or day_notes:
@@ -419,7 +420,8 @@ for park in selected_parks:
             f'<div class="cw-court-card"><div class="cw-court-card-head"><div><div class="cw-court">{court}</div>{court_meta}</div>{status_badge}</div><div class="cw-chip-wrap">{chip_html}</div><div class="cw-meta-strip">{meta_pills}</div></div>'
         )
     html_parts.append('</div></div>')
-    st.markdown(''.join(html_parts), unsafe_allow_html=True)
+    with column:
+        st.markdown(''.join(html_parts), unsafe_allow_html=True)
 
 with st.expander("Raw merged rows"):
     st.dataframe(
