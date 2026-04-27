@@ -1,6 +1,20 @@
 # Database (downloaded from S3 at runtime)
 court_watch.db
 
+# Pipeline / VM-only code (not needed for Streamlit Cloud)
+scripts/
+tests/
+docs/
+ops/
+reference/
+backend/clients/
+backend/parsers/
+backend/services/analytics.py
+backend/services/bootstrap.py
+backend/services/persistence.py
+backend/services/scrape_service.py
+pyproject.toml
+
 # Environment
 .env
 
