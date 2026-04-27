@@ -8,7 +8,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 import streamlit as st
 
-from app.schedule_context import SCHEDULE_CONTEXT
+from schedule_context import SCHEDULE_CONTEXT
 
 st.set_page_config(page_title="Free Court Watcher", layout="wide")
 
