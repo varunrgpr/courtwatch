@@ -83,6 +83,91 @@ def _format_time_12h(time_str: str) -> str:
     return formatted[1:] if formatted.startswith("0") else formatted
 
 
+_DEFAULT_OPEN_HOUR = 7   # 7 AM
+_DEFAULT_CLOSE_HOUR = 22  # 10 PM
+
+
+def _time_to_minutes(time_str: str) -> int:
+    """Convert a time string to minutes from midnight for range math."""
+    if not time_str or time_str == "—":
+        return 0
+    time_str = time_str.strip()
+    try:
+        t = datetime.strptime(time_str, "%H:%M")
+    except ValueError:
+        try:
+            t = datetime.strptime(time_str, "%I:%M %p")
+        except ValueError:
+            return 0
+    return t.hour * 60 + t.minute
+
+
+def _minutes_to_12h(minutes: int) -> str:
+    """Convert minutes from midnight to a 12-hour time string."""
+    h = minutes // 60
+    m = minutes % 60
+    t = datetime(2000, 1, 1, h, m)
+    formatted = t.strftime("%I:%M %p")
+    return formatted[1:] if formatted.startswith("0") else formatted
+
+
+def _fill_operating_hours_gaps(court_rows, open_hour=_DEFAULT_OPEN_HOUR, close_hour=_DEFAULT_CLOSE_HOUR):
+    """Create synthetic unavailable slots for any gaps within operating hours.
+
+    This ensures the UI shows the full day (e.g. 7 AM – 10 PM) even when the
+    scraped data stops partway through.
+    """
+    if not court_rows:
+        return []
+    template = court_rows[0]
+    open_m = open_hour * 60
+    close_m = close_hour * 60
+
+    # Collect covered time ranges
+    ranges = []
+    for row in court_rows:
+        start_m = _time_to_minutes(row["start"])
+        end_m = _time_to_minutes(row["end"])
+        if start_m < end_m:
+            ranges.append((start_m, end_m))
+    if not ranges:
+        return []
+    ranges.sort()
+
+    # Merge overlapping / adjacent ranges
+    merged_ranges = [list(ranges[0])]
+    for start_m, end_m in ranges[1:]:
+        if start_m <= merged_ranges[-1][1]:
+            merged_ranges[-1][1] = max(merged_ranges[-1][1], end_m)
+        else:
+            merged_ranges.append([start_m, end_m])
+
+    # Identify gaps
+    gaps: list[tuple[int, int]] = []
+    cursor = open_m
+    for start_m, end_m in merged_ranges:
+        if start_m > cursor:
+            gaps.append((cursor, start_m))
+        cursor = max(cursor, end_m)
+    if cursor < close_m:
+        gaps.append((cursor, close_m))
+
+    return [
+        {
+            "park": template["park"],
+            "court": template["court"],
+            "date": template["date"],
+            "start": _minutes_to_12h(gs),
+            "end": _minutes_to_12h(ge),
+            "source_status": "no_data",
+            "playable_status": "not_playable",
+            "observed_at": template.get("observed_at"),
+            "segments": 1,
+        }
+        for gs, ge in gaps
+    ]
+
+
 def format_timestamp(value: str) -> str:
     if not value or value == "—":
         return "—"
@@ -91,7 +176,12 @@ def format_timestamp(value: str) -> str:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         local_dt = dt.astimezone(_DISPLAY_TIMEZONE)
-        return local_dt.strftime("%b %d, %I:%M %p")
+        formatted = local_dt.strftime("%b %d, %I:%M %p")
+        # Strip leading zero from hour (e.g. "Apr 28, 01:30 PM" → "Apr 28, 1:30 PM")
+        parts = formatted.split(", ", 1)
+        if len(parts) == 2 and parts[1].startswith("0"):
+            formatted = parts[0] + ", " + parts[1][1:]
+        return formatted
     except Exception:
         return value
 
@@ -356,12 +446,21 @@ if not rows:
     st.warning("No stored snapshot yet. Upload the latest availability CSV first.")
     st.stop()
 
-parks = sorted({row["park"] for row in rows if row.get("park")})
+# --- Date selector (prominent, at the top) ---
+available_dates = sorted({row["date"] for row in rows if row.get("date")})
+if available_dates:
+    selected_date = st.selectbox("Date", available_dates, index=len(available_dates) - 1)
+else:
+    selected_date = None
+
+date_rows = [row for row in rows if row.get("date") == selected_date] if selected_date else rows
+
+parks = sorted({row["park"] for row in date_rows if row.get("park")})
 with st.expander("Filters", expanded=False):
     selected_parks = st.multiselect("Parks", parks, default=parks)
     show_unplayable = st.toggle("Include unavailable windows", value=True)
 
-filtered = [row for row in rows if row.get("park") in selected_parks]
+filtered = [row for row in date_rows if row.get("park") in selected_parks]
 playable_rows = [row for row in filtered if row.get("playable_status") == "playable"]
 if show_unplayable:
     visible_rows = filtered
@@ -369,7 +468,6 @@ else:
     visible_rows = playable_rows
 
 last_updated = max((row.get("observed_at") for row in filtered if row.get("observed_at")), default="—")
-report_date = filtered[0]["date"] if filtered else "—"
 
 st.caption(f"Last refreshed: {format_timestamp(last_updated)}")
 
@@ -380,7 +478,7 @@ visible_parks = [park for park in selected_parks if park in grouped]
 park_columns = st.columns(len(visible_parks)) if visible_parks else []
 
 for column, park in zip(park_columns, visible_parks):
-    summary, day_notes = get_schedule_context(park, report_date)
+    summary, day_notes = get_schedule_context(park, selected_date or "")
     context_html = ""
     if summary or day_notes:
         note_items = ''.join(f'<li>{note}</li>' for note in day_notes)
@@ -389,52 +487,47 @@ for column, park in zip(park_columns, visible_parks):
         context_html = f'<div class="cw-context"><div class="cw-context-title">Today’s court-use context</div>{summary_html}{notes_html}</div>'
     html_parts = [f'<div class="cw-card"><div class="cw-park">{park}</div>{context_html}<div class="cw-court-grid">']
     for court in sorted(grouped[park].keys()):
-        court_rows = sorted(grouped[park][court], key=lambda row: (row["start"], row["end"]))
+        court_rows = sorted(
+            grouped[park][court],
+            key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
+        )
+
+        # --- Fill gaps so the full operating-hours range is visible ---
+        gap_rows = _fill_operating_hours_gaps(court_rows)
+        all_court_rows = sorted(
+            court_rows + gap_rows,
+            key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
+        )
+
+        playable_count = sum(1 for r in court_rows if r["playable_status"] == "playable")
+
+        # Build chips — only show unavailable rows when the toggle is on
+        display_rows = all_court_rows if show_unplayable else [r for r in all_court_rows if r["playable_status"] == "playable"]
         chips: list[str] = []
-        playable_chip_count = sum(1 for row in court_rows if row["playable_status"] == "playable")
-        unavailable_chip_count = sum(1 for row in court_rows if row["playable_status"] != "playable")
-        total_segments = sum(row.get("segments", 1) for row in court_rows)
-        longest_minutes = 0
-        for row in court_rows:
-            if row["playable_status"] != "playable":
-                continue
-            try:
-                start_dt = datetime.strptime(row["start"], "%I:%M %p")
-            except ValueError:
-                start_dt = datetime.strptime(row["start"], "%H:%M")
-            try:
-                end_dt = datetime.strptime(row["end"], "%I:%M %p")
-            except ValueError:
-                end_dt = datetime.strptime(row["end"], "%H:%M")
-            longest_minutes = max(longest_minutes, int((end_dt - start_dt).total_seconds() // 60))
-        availability_pct = round((playable_chip_count / len(court_rows)) * 100) if court_rows else 0
-        if playable_chip_count and unavailable_chip_count:
-            status_badge = '<span class="cw-status">Some availability</span>'
-        elif playable_chip_count:
-            status_badge = '<span class="cw-status">Playable</span>'
-        else:
-            status_badge = '<span class="cw-status cw-status-muted">Unavailable</span>'
-        for row in court_rows:
+        for row in display_rows:
             cls = "cw-chip" if row["playable_status"] == "playable" else "cw-chip cw-chip-muted"
-            label = f'{_format_time_12h(row["start"])}–{_format_time_12h(row["end"])}'
+            label = f'{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}'
             if row.get("segments", 1) > 1:
                 label += f' · {row["segments"]} slots'
-            if show_unplayable and row["playable_status"] != "playable":
+            if row["playable_status"] != "playable":
                 label += " · unavailable"
-            tooltip = f'Status: {row["playable_status"].replace("_", " ")} | Source: {row["source_status"]} | Date: {row["date"]}'
-            chips.append(f'<span class="{cls}" title="{tooltip}">{label}</span>')
-        chip_html = ''.join(chips) if chips else '<div class="cw-empty">No matching windows</div>'
-        meta_pills = ''.join([
-            f'<span class="cw-meta-pill">{playable_chip_count} playable groups</span>',
-            f'<span class="cw-meta-pill">{unavailable_chip_count} unavailable groups</span>',
-            f'<span class="cw-meta-pill">{availability_pct}% available</span>',
-            f'<span class="cw-meta-pill">Longest playable {longest_minutes} min</span>',
-            f'<span class="cw-meta-pill">{total_segments} merged slots</span>',
-            f'<span class="cw-meta-pill">{court_rows[0]["date"]}</span>',
-        ])
-        court_meta = f'<div class="cw-court-meta">Last updated {format_timestamp(max((row.get("observed_at") for row in court_rows if row.get("observed_at")), default="—"))}</div>'
+            chips.append(f'<span class="{cls}">{label}</span>')
+
+        # Only show a badge when the court has NO availability at all
+        if playable_count == 0:
+            status_html = '<span class="cw-status cw-status-muted">No Availability</span>'
+        else:
+            status_html = ""
+
+        chip_html = ''.join(chips) if chips else '<div class="cw-empty">No time slots to display</div>'
         html_parts.append(
-            f'<div class="cw-court-card"><div class="cw-court-card-head"><div><div class="cw-court">{court}</div>{court_meta}</div>{status_badge}</div><div class="cw-chip-wrap">{chip_html}</div><div class="cw-meta-strip">{meta_pills}</div></div>'
+            f'<div class="cw-court-card">'
+            f'<div class="cw-court-card-head">'
+            f'<div><div class="cw-court">{court}</div></div>'
+            f'{status_html}'
+            f'</div>'
+            f'<div class="cw-chip-wrap">{chip_html}</div>'
+            f'</div>'
         )
     html_parts.append('</div></div>')
     with column:
