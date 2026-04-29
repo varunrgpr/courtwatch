@@ -193,6 +193,50 @@ def group_by_park_and_court(rows: list[dict]) -> dict[str, dict[str, list[dict]]
     return grouped
 
 
+def _format_bucket_label(start_minutes: int, end_minutes: int) -> str:
+    return f"{_minutes_to_12h(start_minutes)} – {_minutes_to_12h(end_minutes)}"
+
+
+def _build_time_buckets(rows: list[dict], bucket_minutes: int = 120) -> list[dict]:
+    bucket_start = _DEFAULT_OPEN_HOUR * 60
+    bucket_end = _DEFAULT_CLOSE_HOUR * 60
+    buckets: list[dict] = []
+
+    playable = [row for row in rows if row.get("playable_status") == "playable"]
+    for start in range(bucket_start, bucket_end, bucket_minutes):
+        end = min(start + bucket_minutes, bucket_end)
+        park_map: dict[str, list[str]] = defaultdict(list)
+        court_count_map: dict[str, set[str]] = defaultdict(set)
+        for row in playable:
+            row_start = _time_to_minutes(row["start"])
+            row_end = _time_to_minutes(row["end"])
+            overlap_start = max(start, row_start)
+            overlap_end = min(end, row_end)
+            if overlap_start >= overlap_end:
+                continue
+            overlap_label = _format_bucket_label(overlap_start, overlap_end)
+            park = row["park"]
+            court = row["court"]
+            park_map[park].append(f"{court}: {overlap_label}")
+            court_count_map[park].add(court)
+
+        entries = [
+            {
+                "park": park,
+                "court_count": len(court_count_map[park]),
+                "windows": park_map[park],
+            }
+            for park in sorted(park_map.keys())
+        ]
+        buckets.append(
+            {
+                "label": _format_bucket_label(start, end),
+                "entries": entries,
+            }
+        )
+    return buckets
+
+
 def get_schedule_context(park: str, report_date: str) -> tuple[str | None, list[str]]:
     # Map the report's date to the park's human-authored court-use guidance so
     # the UI can explain why some windows may exist or be absent on a given day.
@@ -272,14 +316,14 @@ st.markdown(
         border-radius: 999px;
         font-size: 0.78rem;
         font-weight: 700;
-        border: 1px solid #bfdbfe;
-        background: #eff6ff;
-        color: #1d4ed8;
+        border: 1px solid #86efac;
+        background: #f0fdf4;
+        color: #15803d;
       }
       .cw-status-muted {
-        border-color: #cbd5e1;
-        background: #f8fafc;
-        color: #64748b;
+        border-color: #fca5a5;
+        background: #fef2f2;
+        color: #b91c1c;
       }
       .cw-chip-wrap {
         display: flex;
@@ -290,9 +334,9 @@ st.markdown(
         display: inline-block;
         padding: 8px 13px;
         border-radius: 999px;
-        border: 1px solid #93c5fd;
-        background: #eff6ff;
-        color: #1d4ed8;
+        border: 1px solid #86efac;
+        background: #f0fdf4;
+        color: #15803d;
         font-size: 0.92rem;
         font-weight: 600;
         transition: all 160ms ease;
@@ -300,23 +344,23 @@ st.markdown(
         -webkit-tap-highlight-color: transparent;
       }
       .cw-chip:hover {
-        border-color: #60a5fa;
-        background: #dbeafe;
+        border-color: #4ade80;
+        background: #dcfce7;
         transform: translateY(-1px);
-        box-shadow: 0 6px 14px rgba(37, 99, 235, 0.12);
+        box-shadow: 0 6px 14px rgba(22, 163, 74, 0.12);
       }
       .cw-chip:active {
         transform: translateY(0px) scale(0.985);
       }
       .cw-chip-muted {
-        border-color: #cbd5e1;
-        background: #f8fafc;
-        color: #64748b;
+        border-color: #fca5a5;
+        background: #fef2f2;
+        color: #b91c1c;
       }
       .cw-chip-muted:hover {
-        border-color: #94a3b8;
-        background: #f1f5f9;
-        box-shadow: 0 4px 10px rgba(100, 116, 139, 0.08);
+        border-color: #f87171;
+        background: #fee2e2;
+        box-shadow: 0 4px 10px rgba(185, 28, 28, 0.08);
       }
       .cw-empty {
         color: #64748b;
@@ -387,6 +431,47 @@ st.markdown(
         color: #475569;
         font-size: 0.8rem;
         line-height: 1.1;
+      }
+      .cw-bucket-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
+      }
+      .cw-bucket-card {
+        border: 1px solid #dcfce7;
+        border-radius: 18px;
+        padding: 16px;
+        background: linear-gradient(180deg, #ffffff 0%, #f7fee7 100%);
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+      }
+      .cw-bucket-title {
+        font-size: 1rem;
+        font-weight: 800;
+        color: #14532d;
+        margin-bottom: 10px;
+      }
+      .cw-bucket-entry {
+        padding: 10px 0;
+        border-top: 1px solid #e5e7eb;
+      }
+      .cw-bucket-entry:first-of-type {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .cw-bucket-park {
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 4px;
+      }
+      .cw-bucket-meta {
+        color: #15803d;
+        font-size: 0.82rem;
+        margin-bottom: 4px;
+      }
+      .cw-bucket-windows {
+        color: #475569;
+        font-size: 0.88rem;
+        line-height: 1.4;
       }
       @media (max-width: 900px) {
         .cw-card {
@@ -473,67 +558,88 @@ st.caption(f"Last refreshed: {format_timestamp(last_updated)}")
 
 grouped = group_by_park_and_court(visible_rows)
 
-st.subheader("Open windows by court")
-visible_parks = [park for park in selected_parks if park in grouped]
-park_columns = st.columns(len(visible_parks)) if visible_parks else []
+st.subheader("Best Times To Play")
+time_buckets = _build_time_buckets(filtered)
+bucket_cards: list[str] = ['<div class="cw-bucket-grid">']
+for bucket in time_buckets:
+    if bucket["entries"]:
+        entry_html = []
+        for entry in bucket["entries"]:
+            windows_html = "<br>".join(entry["windows"])
+            entry_html.append(
+                f'<div class="cw-bucket-entry">'
+                f'<div class="cw-bucket-park">{entry["park"]}</div>'
+                f'<div class="cw-bucket-meta">{entry["court_count"]} court{"s" if entry["court_count"] != 1 else ""} free in this block</div>'
+                f'<div class="cw-bucket-windows">{windows_html}</div>'
+                f'</div>'
+            )
+        body = "".join(entry_html)
+    else:
+        body = '<div class="cw-empty">No free courts in this time block.</div>'
+    bucket_cards.append(
+        f'<div class="cw-bucket-card"><div class="cw-bucket-title">{bucket["label"]}</div>{body}</div>'
+    )
+bucket_cards.append("</div>")
+st.markdown("".join(bucket_cards), unsafe_allow_html=True)
 
-for column, park in zip(park_columns, visible_parks):
-    summary, day_notes = get_schedule_context(park, selected_date or "")
-    context_html = ""
-    if summary or day_notes:
-        note_items = ''.join(f'<li>{note}</li>' for note in day_notes)
-        notes_html = f'<ul>{note_items}</ul>' if note_items else ''
-        summary_html = f'<div class="cw-context-copy">{summary}</div>' if summary else ''
-        context_html = f'<div class="cw-context"><div class="cw-context-title">Today’s court-use context</div>{summary_html}{notes_html}</div>'
-    html_parts = [f'<div class="cw-card"><div class="cw-park">{park}</div>{context_html}<div class="cw-court-grid">']
-    for court in sorted(grouped[park].keys()):
-        court_rows = sorted(
-            grouped[park][court],
-            key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
-        )
+with st.expander("Detailed by park and court", expanded=False):
+    st.subheader("Open windows by court")
+    visible_parks = [park for park in selected_parks if park in grouped]
+    park_columns = st.columns(len(visible_parks)) if visible_parks else []
 
-        # --- Fill gaps so the full operating-hours range is visible ---
-        gap_rows = _fill_operating_hours_gaps(court_rows)
-        all_court_rows = sorted(
-            court_rows + gap_rows,
-            key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
-        )
+    for column, park in zip(park_columns, visible_parks):
+        summary, day_notes = get_schedule_context(park, selected_date or "")
+        context_html = ""
+        if summary or day_notes:
+            note_items = ''.join(f'<li>{note}</li>' for note in day_notes)
+            notes_html = f'<ul>{note_items}</ul>' if note_items else ''
+            summary_html = f'<div class="cw-context-copy">{summary}</div>' if summary else ''
+            context_html = f'<div class="cw-context"><div class="cw-context-title">Today’s court-use context</div>{summary_html}{notes_html}</div>'
+        html_parts = [f'<div class="cw-card"><div class="cw-park">{park}</div>{context_html}<div class="cw-court-grid">']
+        for court in sorted(grouped[park].keys()):
+            court_rows = sorted(
+                grouped[park][court],
+                key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
+            )
 
-        playable_count = sum(1 for r in court_rows if r["playable_status"] == "playable")
+            gap_rows = _fill_operating_hours_gaps(court_rows)
+            all_court_rows = sorted(
+                court_rows + gap_rows,
+                key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
+            )
 
-        # Build chips — only show unavailable rows when the toggle is on
-        display_rows = all_court_rows if show_unplayable else [r for r in all_court_rows if r["playable_status"] == "playable"]
-        chips: list[str] = []
-        for row in display_rows:
-            cls = "cw-chip" if row["playable_status"] == "playable" else "cw-chip cw-chip-muted"
-            label = f'{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}'
-            if row.get("segments", 1) > 1:
-                label += f' · {row["segments"]} slots'
-            if row.get("source_status") == "drop_in_open_play":
-                label += " · open play"
-            elif row["playable_status"] != "playable":
-                label += " · not reservable"
-            chips.append(f'<span class="{cls}">{label}</span>')
+            playable_count = sum(1 for r in court_rows if r["playable_status"] == "playable")
+            display_rows = all_court_rows if show_unplayable else [r for r in all_court_rows if r["playable_status"] == "playable"]
+            chips: list[str] = []
+            for row in display_rows:
+                cls = "cw-chip" if row["playable_status"] == "playable" else "cw-chip cw-chip-muted"
+                label = f'{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}'
+                if row.get("segments", 1) > 1:
+                    label += f' · {row["segments"]} slots'
+                if row.get("source_status") == "drop_in_open_play":
+                    label += " · open play"
+                elif row["playable_status"] != "playable":
+                    label += " · not reservable"
+                chips.append(f'<span class="{cls}">{label}</span>')
 
-        # Only show a badge when the court has NO availability at all
-        if playable_count == 0:
-            status_html = '<span class="cw-status cw-status-muted">No Availability</span>'
-        else:
-            status_html = ""
+            if playable_count == 0:
+                status_html = '<span class="cw-status cw-status-muted">No Availability</span>'
+            else:
+                status_html = ""
 
-        chip_html = ''.join(chips) if chips else '<div class="cw-empty">No time slots to display</div>'
-        html_parts.append(
-            f'<div class="cw-court-card">'
-            f'<div class="cw-court-card-head">'
-            f'<div><div class="cw-court">{court}</div></div>'
-            f'{status_html}'
-            f'</div>'
-            f'<div class="cw-chip-wrap">{chip_html}</div>'
-            f'</div>'
-        )
-    html_parts.append('</div></div>')
-    with column:
-        st.markdown(''.join(html_parts), unsafe_allow_html=True)
+            chip_html = ''.join(chips) if chips else '<div class="cw-empty">No time slots to display</div>'
+            html_parts.append(
+                f'<div class="cw-court-card">'
+                f'<div class="cw-court-card-head">'
+                f'<div><div class="cw-court">{court}</div></div>'
+                f'{status_html}'
+                f'</div>'
+                f'<div class="cw-chip-wrap">{chip_html}</div>'
+                f'</div>'
+            )
+        html_parts.append('</div></div>')
+        with column:
+            st.markdown(''.join(html_parts), unsafe_allow_html=True)
 
 with st.expander("Raw merged rows"):
     st.dataframe(
