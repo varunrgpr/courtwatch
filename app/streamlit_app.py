@@ -289,11 +289,16 @@ def _build_time_buckets(rows: list[dict], bucket_minutes: int = 120) -> list[dic
     bucket_end = _DEFAULT_CLOSE_HOUR * 60
     buckets: list[dict] = []
 
+    all_courts_by_park: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        all_courts_by_park[row["park"]].add(row["court"])
+
     playable = [row for row in rows if row.get("playable_status") == "playable"]
     for start in range(bucket_start, bucket_end, bucket_minutes):
         end = min(start + bucket_minutes, bucket_end)
-        park_map: dict[str, list[str]] = defaultdict(list)
-        court_count_map: dict[str, set[str]] = defaultdict(set)
+        block_minutes = end - start
+
+        court_ranges: dict[str, dict[str, list[tuple[int, int]]]] = defaultdict(lambda: defaultdict(list))
         for row in playable:
             row_start = _time_to_minutes(row["start"])
             row_end = _time_to_minutes(row["end"])
@@ -301,26 +306,36 @@ def _build_time_buckets(rows: list[dict], bucket_minutes: int = 120) -> list[dic
             overlap_end = min(end, row_end)
             if overlap_start >= overlap_end:
                 continue
-            overlap_label = _format_bucket_label(overlap_start, overlap_end)
-            park = row["park"]
-            court = row["court"]
-            park_map[park].append(f"{court}: {overlap_label}")
-            court_count_map[park].add(court)
+            court_ranges[row["park"]][row["court"]].append((overlap_start, overlap_end))
 
-        entries = [
-            {
+        entries = []
+        for park in sorted(court_ranges.keys()):
+            total_courts = len(all_courts_by_park[park])
+            total_court_minutes = total_courts * block_minutes
+            free_court_minutes = 0
+            windows: list[str] = []
+
+            for court in sorted(court_ranges[park].keys()):
+                ranges = sorted(court_ranges[park][court])
+                merged = [list(ranges[0])]
+                for rs, re in ranges[1:]:
+                    if rs <= merged[-1][1]:
+                        merged[-1][1] = max(merged[-1][1], re)
+                    else:
+                        merged.append([rs, re])
+                for rs, re in merged:
+                    free_court_minutes += re - rs
+                    windows.append(f"{court}: {_format_bucket_label(rs, re)}")
+
+            avail_pct = round(free_court_minutes / total_court_minutes * 100) if total_court_minutes else 0
+            entries.append({
                 "park": park,
-                "court_count": len(court_count_map[park]),
-                "windows": park_map[park],
-            }
-            for park in sorted(park_map.keys())
-        ]
-        buckets.append(
-            {
-                "label": _format_bucket_label(start, end),
-                "entries": entries,
-            }
-        )
+                "court_count": len(court_ranges[park]),
+                "avail_pct": avail_pct,
+                "windows": windows,
+            })
+
+        buckets.append({"label": _format_bucket_label(start, end), "entries": entries})
     return buckets
 
 
@@ -676,7 +691,7 @@ for bucket in time_buckets:
             windows_html = "<br>".join(entry["windows"])
             entry_html.append(
                 f'<div class="cw-bucket-entry">'
-                f'<div class="cw-bucket-park">{entry["park"]}</div>'
+                f'<div class="cw-bucket-park">{entry["park"]} <span style="color:#15803d;font-weight:600;font-size:0.85rem">{entry["avail_pct"]}% free</span></div>'
                 f'<div class="cw-bucket-meta">{entry["court_count"]} court{"s" if entry["court_count"] != 1 else ""} free in this block</div>'
                 f'<div class="cw-bucket-windows">{windows_html}</div>'
                 f'</div>'
