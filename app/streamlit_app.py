@@ -324,6 +324,26 @@ def _build_time_buckets(rows: list[dict], bucket_minutes: int = 120) -> list[dic
     return buckets
 
 
+def _build_enriched_rows(rows: list[dict], report_date: str) -> list[dict]:
+    grouped = group_by_park_and_court(rows)
+    enriched: list[dict] = []
+    for park, courts in grouped.items():
+        for court, court_rows in courts.items():
+            ordered = sorted(
+                court_rows,
+                key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
+            )
+            gap_rows = _fill_operating_hours_gaps(ordered)
+            adjusted = _apply_schedule_open_play(
+                ordered + gap_rows,
+                park,
+                report_date,
+                court,
+            )
+            enriched.extend(adjusted)
+    return enriched
+
+
 def get_schedule_context(park: str, report_date: str) -> tuple[str | None, list[str]]:
     # Map the report's date to the park's human-authored court-use guidance so
     # the UI can explain why some windows may exist or be absent on a given day.
@@ -640,13 +660,14 @@ else:
     visible_rows = playable_rows
 
 last_updated = max((row.get("observed_at") for row in filtered if row.get("observed_at")), default="—")
+enriched_rows = _build_enriched_rows(filtered, selected_date or "")
 
 st.caption(f"Last refreshed: {format_timestamp(last_updated)}")
 
 grouped = group_by_park_and_court(visible_rows)
 
 st.subheader("Best Times To Play")
-time_buckets = _build_time_buckets(filtered)
+time_buckets = _build_time_buckets(enriched_rows)
 bucket_cards: list[str] = ['<div class="cw-bucket-grid">']
 for bucket in time_buckets:
     if bucket["entries"]:
