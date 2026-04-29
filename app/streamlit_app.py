@@ -663,10 +663,11 @@ else:
 date_rows = [row for row in rows if row.get("date") == selected_date] if selected_date else rows
 
 parks = sorted({row["park"] for row in date_rows if row.get("park")})
-with st.expander("Filters", expanded=False):
-    _preferred = {"Fort Scott", "Hayes"}
-    selected_parks = st.multiselect("Parks", parks, default=[p for p in parks if p in _preferred])
-    show_unplayable = st.toggle("Include not-reservable windows", value=True)
+_preferred = {"Fort Scott", "Hayes"}
+if "selected_parks" not in st.session_state:
+    st.session_state["selected_parks"] = [p for p in parks if p in _preferred]
+selected_parks = st.multiselect("Parks", parks, key="selected_parks")
+show_unplayable = st.toggle("Include not-reservable windows", value=True)
 
 filtered = [row for row in date_rows if row.get("park") in selected_parks]
 playable_rows = [row for row in filtered if row.get("playable_status") == "playable"]
