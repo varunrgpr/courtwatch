@@ -2,6 +2,7 @@ import csv
 import io
 from collections import defaultdict
 from datetime import datetime, timezone
+import re
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -159,13 +160,99 @@ def _fill_operating_hours_gaps(court_rows, open_hour=_DEFAULT_OPEN_HOUR, close_h
             "date": template["date"],
             "start": _minutes_to_12h(gs),
             "end": _minutes_to_12h(ge),
-            "source_status": "drop_in_open_play",
-            "playable_status": "playable",
+            "source_status": "no_data",
+            "playable_status": "not_playable",
             "observed_at": template.get("observed_at"),
             "segments": 1,
         }
         for gs, ge in gaps
     ]
+
+
+def _parse_clock_label(value: str) -> int:
+    value = value.strip().upper().replace(" ", "")
+    for fmt in ("%I:%M%p", "%I%p"):
+        try:
+            t = datetime.strptime(value, fmt)
+            return t.hour * 60 + t.minute
+        except ValueError:
+            continue
+    raise ValueError(f"Unsupported time label: {value}")
+
+
+def _courts_for_scope(scope: str, court_name: str) -> bool:
+    scope = scope.strip().lower()
+    if scope.startswith("both courts"):
+        return True
+    if "courts 1-2" in scope:
+        return "#1" in court_name or "#2" in court_name
+    if "courts 2-3" in scope:
+        return "#2" in court_name or "#3" in court_name
+    match = re.search(r"court\s+(\d+)", scope)
+    if match:
+        token = f"#{match.group(1)}"
+        return token in court_name
+    return False
+
+
+def _schedule_open_play_windows(park: str, report_date: str, court_name: str) -> list[tuple[int, int]]:
+    _, day_notes = get_schedule_context(park, report_date)
+    windows: list[tuple[int, int]] = []
+    for note in day_notes:
+        if ":" not in note:
+            continue
+        scope, rest = note.split(":", 1)
+        if not _courts_for_scope(scope, court_name):
+            continue
+        segments = [part.strip() for part in re.split(r",|\bthen\b", rest) if part.strip()]
+        for segment in segments:
+            if "drop-in pickleball" not in segment.lower():
+                continue
+            match = re.search(r"(\d{1,2}(?::\d{2})?\s*[ap]m)\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m)", segment, re.I)
+            if not match:
+                continue
+            windows.append((_parse_clock_label(match.group(1)), _parse_clock_label(match.group(2))))
+    return windows
+
+
+def _apply_schedule_open_play(rows: list[dict], park: str, report_date: str, court_name: str) -> list[dict]:
+    windows = _schedule_open_play_windows(park, report_date, court_name)
+    if not windows:
+        return rows
+
+    transformed: list[dict] = []
+    for row in rows:
+        row_start = _time_to_minutes(row["start"])
+        row_end = _time_to_minutes(row["end"])
+        if row_start >= row_end:
+            transformed.append(row)
+            continue
+
+        pieces = [(row_start, row_end, row["playable_status"], row.get("source_status", ""))]
+        for win_start, win_end in windows:
+            next_pieces = []
+            for seg_start, seg_end, seg_status, seg_source in pieces:
+                overlap_start = max(seg_start, win_start)
+                overlap_end = min(seg_end, win_end)
+                if overlap_start >= overlap_end:
+                    next_pieces.append((seg_start, seg_end, seg_status, seg_source))
+                    continue
+                if seg_start < overlap_start:
+                    next_pieces.append((seg_start, overlap_start, seg_status, seg_source))
+                next_pieces.append((overlap_start, overlap_end, "playable", "scheduled_open_play"))
+                if overlap_end < seg_end:
+                    next_pieces.append((overlap_end, seg_end, seg_status, seg_source))
+            pieces = next_pieces
+
+        for seg_start, seg_end, seg_status, seg_source in pieces:
+            payload = dict(row)
+            payload["start"] = _minutes_to_12h(seg_start)
+            payload["end"] = _minutes_to_12h(seg_end)
+            payload["playable_status"] = seg_status
+            payload["source_status"] = seg_source
+            payload["segments"] = 1
+            transformed.append(payload)
+    return transformed
 
 
 def format_timestamp(value: str) -> str:
@@ -603,12 +690,18 @@ with st.expander("Detailed by park and court", expanded=False):
             )
 
             gap_rows = _fill_operating_hours_gaps(court_rows)
-            all_court_rows = sorted(
+            schedule_adjusted_rows = _apply_schedule_open_play(
                 court_rows + gap_rows,
+                park,
+                selected_date or "",
+                court,
+            )
+            all_court_rows = sorted(
+                schedule_adjusted_rows,
                 key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])),
             )
 
-            playable_count = sum(1 for r in court_rows if r["playable_status"] == "playable")
+            playable_count = sum(1 for r in all_court_rows if r["playable_status"] == "playable")
             display_rows = all_court_rows if show_unplayable else [r for r in all_court_rows if r["playable_status"] == "playable"]
             chips: list[str] = []
             for row in display_rows:
@@ -616,7 +709,7 @@ with st.expander("Detailed by park and court", expanded=False):
                 label = f'{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}'
                 if row.get("segments", 1) > 1:
                     label += f' · {row["segments"]} slots'
-                if row.get("source_status") == "drop_in_open_play":
+                if row.get("source_status") in {"drop_in_open_play", "scheduled_open_play"}:
                     label += " · open play"
                 elif row["playable_status"] != "playable":
                     label += " · not reservable"
