@@ -62,6 +62,27 @@ def get_rows() -> list[dict]:
     return normalized
 
 
+def _format_time_12h(time_str: str) -> str:
+    """Convert a time string (HH:MM or H:MM AM/PM) to 12-hour format like '2:30 PM'.
+
+    Handles both 24-hour input from legacy CSVs and already-converted 12-hour
+    input so the display layer is resilient to either source format.
+    """
+    if not time_str or time_str == "—":
+        return time_str
+    try:
+        # Try 24-hour format first (legacy data)
+        t = datetime.strptime(time_str, "%H:%M")
+    except ValueError:
+        try:
+            # Already in 12-hour format
+            t = datetime.strptime(time_str, "%I:%M %p")
+        except ValueError:
+            return time_str
+    formatted = t.strftime("%I:%M %p")
+    return formatted[1:] if formatted.startswith("0") else formatted
+
+
 def format_timestamp(value: str) -> str:
     if not value or value == "—":
         return "—"
@@ -377,8 +398,14 @@ for column, park in zip(park_columns, visible_parks):
         for row in court_rows:
             if row["playable_status"] != "playable":
                 continue
-            start_dt = datetime.strptime(row["start"], "%H:%M")
-            end_dt = datetime.strptime(row["end"], "%H:%M")
+            try:
+                start_dt = datetime.strptime(row["start"], "%I:%M %p")
+            except ValueError:
+                start_dt = datetime.strptime(row["start"], "%H:%M")
+            try:
+                end_dt = datetime.strptime(row["end"], "%I:%M %p")
+            except ValueError:
+                end_dt = datetime.strptime(row["end"], "%H:%M")
             longest_minutes = max(longest_minutes, int((end_dt - start_dt).total_seconds() // 60))
         availability_pct = round((playable_chip_count / len(court_rows)) * 100) if court_rows else 0
         if playable_chip_count and unavailable_chip_count:
@@ -389,7 +416,7 @@ for column, park in zip(park_columns, visible_parks):
             status_badge = '<span class="cw-status cw-status-muted">Unavailable</span>'
         for row in court_rows:
             cls = "cw-chip" if row["playable_status"] == "playable" else "cw-chip cw-chip-muted"
-            label = f'{row["start"]}–{row["end"]}'
+            label = f'{_format_time_12h(row["start"])}–{_format_time_12h(row["end"])}'
             if row.get("segments", 1) > 1:
                 label += f' · {row["segments"]} slots'
             if show_unplayable and row["playable_status"] != "playable":
@@ -420,8 +447,8 @@ with st.expander("Raw merged rows"):
                 "park": row["park"],
                 "court": row["court"],
                 "date": row["date"],
-                "start": row["start"],
-                "end": row["end"],
+                "start": _format_time_12h(row["start"]),
+                "end": _format_time_12h(row["end"]),
                 "source_status": row["source_status"],
                 "playable_status": row["playable_status"],
                 "merged_segments": row.get("segments", 1),

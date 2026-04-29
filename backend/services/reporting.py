@@ -6,13 +6,19 @@ from backend.db.session import SessionLocal
 from backend.models import Court, Park, ReservationSlot, ScrapeRun
 
 
+def _format_time_12h(t) -> str:
+    """Format a time object to 12-hour format like '2:30 PM'."""
+    formatted = t.strftime("%I:%M %p")
+    return formatted[1:] if formatted.startswith("0") else formatted
+
+
 def _normalize_row(park, court, slot_date, start_time, end_time, status, observed_at, scrape_run_id: int) -> dict:
     return {
         "park": park,
         "court": court,
         "date": str(slot_date),
-        "start": start_time.strftime("%H:%M"),
-        "end": end_time.strftime("%H:%M"),
+        "start": _format_time_12h(start_time),
+        "end": _format_time_12h(end_time),
         "source_status": status,
         "playable_status": "playable" if status == "open" else "not_playable" if status == "unavailable" else "unknown",
         "observed_at": observed_at.isoformat() if observed_at else None,
