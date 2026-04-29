@@ -159,8 +159,8 @@ def _fill_operating_hours_gaps(court_rows, open_hour=_DEFAULT_OPEN_HOUR, close_h
             "date": template["date"],
             "start": _minutes_to_12h(gs),
             "end": _minutes_to_12h(ge),
-            "source_status": "no_data",
-            "playable_status": "not_playable",
+            "source_status": "drop_in_open_play",
+            "playable_status": "playable",
             "observed_at": template.get("observed_at"),
             "segments": 1,
         }
@@ -458,7 +458,7 @@ date_rows = [row for row in rows if row.get("date") == selected_date] if selecte
 parks = sorted({row["park"] for row in date_rows if row.get("park")})
 with st.expander("Filters", expanded=False):
     selected_parks = st.multiselect("Parks", parks, default=parks)
-    show_unplayable = st.toggle("Include unavailable windows", value=True)
+    show_unplayable = st.toggle("Include not-reservable windows", value=True)
 
 filtered = [row for row in date_rows if row.get("park") in selected_parks]
 playable_rows = [row for row in filtered if row.get("playable_status") == "playable"]
@@ -509,8 +509,10 @@ for column, park in zip(park_columns, visible_parks):
             label = f'{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}'
             if row.get("segments", 1) > 1:
                 label += f' · {row["segments"]} slots'
-            if row["playable_status"] != "playable":
-                label += " · unavailable"
+            if row.get("source_status") == "drop_in_open_play":
+                label += " · open play"
+            elif row["playable_status"] != "playable":
+                label += " · not reservable"
             chips.append(f'<span class="{cls}">{label}</span>')
 
         # Only show a badge when the court has NO availability at all
