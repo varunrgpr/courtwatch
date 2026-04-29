@@ -664,7 +664,8 @@ date_rows = [row for row in rows if row.get("date") == selected_date] if selecte
 
 parks = sorted({row["park"] for row in date_rows if row.get("park")})
 with st.expander("Filters", expanded=False):
-    selected_parks = st.multiselect("Parks", parks, default=parks)
+    _preferred = {"Fort Scott", "Hayes"}
+    selected_parks = st.multiselect("Parks", parks, default=[p for p in parks if p in _preferred])
     show_unplayable = st.toggle("Include not-reservable windows", value=True)
 
 filtered = [row for row in date_rows if row.get("park") in selected_parks]
