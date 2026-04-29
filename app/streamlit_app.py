@@ -663,7 +663,7 @@ else:
 date_rows = [row for row in rows if row.get("date") == selected_date] if selected_date else rows
 
 parks = sorted({row["park"] for row in date_rows if row.get("park")})
-_preferred = {"Fort Scott", "Hayes"}
+_preferred = {"Fort Scott Park", "Hayes Park"}
 if "selected_parks" not in st.session_state:
     st.session_state["selected_parks"] = [p for p in parks if p in _preferred]
 selected_parks = st.multiselect("Parks", parks, key="selected_parks")
