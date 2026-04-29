@@ -113,10 +113,10 @@ def _minutes_to_12h(minutes: int) -> str:
 
 
 def _fill_operating_hours_gaps(court_rows, open_hour=_DEFAULT_OPEN_HOUR, close_hour=_DEFAULT_CLOSE_HOUR):
-    """Create synthetic unavailable slots for any gaps within operating hours.
+    """Create synthetic available slots for any gaps within operating hours.
 
-    This ensures the UI shows the full day (e.g. 7 AM – 10 PM) even when the
-    scraped data stops partway through.
+    Gaps represent time windows where no reservation exists, meaning the court
+    is FREE and available for play.  The UI shows these as playable (green).
     """
     if not court_rows:
         return []
@@ -160,8 +160,8 @@ def _fill_operating_hours_gaps(court_rows, open_hour=_DEFAULT_OPEN_HOUR, close_h
             "date": template["date"],
             "start": _minutes_to_12h(gs),
             "end": _minutes_to_12h(ge),
-            "source_status": "no_data",
-            "playable_status": "not_playable",
+            "source_status": "unreserved",
+            "playable_status": "playable",
             "observed_at": template.get("observed_at"),
             "segments": 1,
         }
