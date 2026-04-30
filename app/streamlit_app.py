@@ -83,17 +83,45 @@ def _normalize_rows(rows: list[dict]) -> list[dict]:
     return normalized
 
 
-@st.cache_data(show_spinner=False, ttl=60)
-def get_rows() -> list[dict]:
-    if _LOCAL_AVAILABILITY_CSV.exists():
-        rows = list(csv.DictReader(_LOCAL_AVAILABILITY_CSV.read_text(encoding="utf-8").splitlines()))
-        return _normalize_rows(rows)
+def _read_local_rows() -> list[dict]:
+    if not _LOCAL_AVAILABILITY_CSV.exists():
+        return []
+    rows = list(csv.DictReader(_LOCAL_AVAILABILITY_CSV.read_text(encoding="utf-8").splitlines()))
+    return _normalize_rows(rows)
 
+
+def _read_s3_rows() -> list[dict]:
     bucket, key, _ = _get_s3_config()
     response = _get_s3_client().get_object(Bucket=bucket, Key=key)
     body = response["Body"].read().decode("utf-8")
     rows = list(csv.DictReader(io.StringIO(body)))
     return _normalize_rows(rows)
+
+
+def _rows_freshness_key(rows: list[dict]) -> tuple[str, str]:
+    if not rows:
+        return ("", "")
+    max_date = max((row.get("date") or "" for row in rows), default="")
+    max_observed = max((row.get("observed_at") or "" for row in rows), default="")
+    return (max_date, max_observed)
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def get_rows() -> list[dict]:
+    local_rows = _read_local_rows()
+    local_key = _rows_freshness_key(local_rows)
+
+    try:
+        s3_rows = _read_s3_rows()
+    except Exception:
+        if local_rows:
+            return local_rows
+        raise
+
+    s3_key = _rows_freshness_key(s3_rows)
+    if s3_key > local_key:
+        return s3_rows
+    return local_rows or s3_rows
 
 
 
@@ -472,21 +500,21 @@ def render_sport_tab(label: str, sport_rows: list[dict], sport_enriched_rows: li
     time_buckets = _build_time_buckets(sport_enriched_rows)
     if selected_time_blocks:
         time_buckets = [bucket for bucket in time_buckets if bucket["label"] in selected_time_blocks]
-    bucket_cards: list[str] = [‘<div class="cw-bucket-grid">’]
+    bucket_cards: list[str] = ['<div class="cw-bucket-grid">']
     for bucket in time_buckets:
-        body = ‘<div class="cw-empty">No free courts in this time block.</div>’
+        body = '<div class="cw-empty">No free courts in this time block.</div>'
         if bucket["entries"]:
             entry_html = []
             for entry in bucket["entries"]:
                 windows_html = "<br>".join(entry["windows"])
                 entry_html.append(
-                    f’<div class="cw-bucket-entry"><div class="cw-bucket-park">{entry["park"]} ‘
-                    f’<span style="color:#15803d;font-weight:600;font-size:0.85rem">{entry["avail_pct"]}% free</span></div>’
-                    f’<div class="cw-bucket-meta">{entry["court_count"]} court{"s" if entry["court_count"] != 1 else ""} free in this block</div>’
-                    f’<div class="cw-bucket-windows">{windows_html}</div></div>’
+                    f'<div class="cw-bucket-entry"><div class="cw-bucket-park">{entry["park"]} '
+                    f'<span style="color:#15803d;font-weight:600;font-size:0.85rem">{entry["avail_pct"]}% free</span></div>'
+                    f'<div class="cw-bucket-meta">{entry["court_count"]} court{"s" if entry["court_count"] != 1 else ""} free in this block</div>'
+                    f'<div class="cw-bucket-windows">{windows_html}</div></div>'
                 )
             body = "".join(entry_html)
-        bucket_cards.append(f’<div class="cw-bucket-card"><div class="cw-bucket-title">{bucket["label"]}</div>{body}</div>’)
+        bucket_cards.append(f'<div class="cw-bucket-card"><div class="cw-bucket-title">{bucket["label"]}</div>{body}</div>')
     bucket_cards.append("</div>")
     st.markdown("".join(bucket_cards), unsafe_allow_html=True)
 
@@ -497,11 +525,11 @@ def render_sport_tab(label: str, sport_rows: list[dict], sport_enriched_rows: li
             summary, day_notes = get_schedule_context(park, selected_date or "")
             context_html = ""
             if summary or day_notes:
-                note_items = ‘’.join(f’<li>{note}</li>’ for note in day_notes)
-                notes_html = f’<ul>{note_items}</ul>’ if note_items else ‘’
-                summary_html = f’<div class="cw-context-copy">{summary}</div>’ if summary else ‘’
-                context_html = f’<div class="cw-context"><div class="cw-context-title">Today’s court-use context</div>{summary_html}{notes_html}</div>’
-            html_parts = [f’<div class="cw-card"><div class="cw-park">{park}</div>{context_html}<div class="cw-court-grid">’]
+                note_items = ''.join(f'<li>{note}</li>' for note in day_notes)
+                notes_html = f'<ul>{note_items}</ul>' if note_items else ''
+                summary_html = f'<div class="cw-context-copy">{summary}</div>' if summary else ''
+                context_html = f'<div class="cw-context"><div class="cw-context-title">Today’s court-use context</div>{summary_html}{notes_html}</div>'
+            html_parts = [f'<div class="cw-card"><div class="cw-park">{park}</div>{context_html}<div class="cw-court-grid">']
             for court in sorted(grouped[park].keys()):
                 court_rows = sorted(grouped[park][court], key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])))
                 gap_rows = _fill_operating_hours_gaps(court_rows)
@@ -512,22 +540,22 @@ def render_sport_tab(label: str, sport_rows: list[dict], sport_enriched_rows: li
                 chips: list[str] = []
                 for row in display_rows:
                     cls = "cw-chip" if row["playable_status"] == "playable" else "cw-chip cw-chip-muted"
-                    label2 = f’{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}’
+                    label2 = f'{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}'
                     if row.get("segments", 1) > 1:
-                        label2 += f’ · {row["segments"]} slots’
+                        label2 += f' · {row["segments"]} slots'
                     if row.get("source_status") in {"drop_in_open_play", "scheduled_open_play"}:
                         label2 += " · open play"
                     elif row["playable_status"] != "playable":
                         label2 += " · not reservable"
-                    chips.append(f’<span class="{cls}">{label2}</span>’)
-                status_html = ‘’ if playable_count else ‘<span class="cw-status cw-status-muted">No Availability</span>’
-                chip_html = ‘’.join(chips) if chips else ‘<div class="cw-empty">No time slots to display</div>’
+                    chips.append(f'<span class="{cls}">{label2}</span>')
+                status_html = '' if playable_count else '<span class="cw-status cw-status-muted">No Availability</span>'
+                chip_html = ''.join(chips) if chips else '<div class="cw-empty">No time slots to display</div>'
                 html_parts.append(
-                    f’<div class="cw-court-card"><div class="cw-court-card-head"><div><div class="cw-court">{court}</div></div>{status_html}</div><div class="cw-chip-wrap">{chip_html}</div></div>’
+                    f'<div class="cw-court-card"><div class="cw-court-card-head"><div><div class="cw-court">{court}</div></div>{status_html}</div><div class="cw-chip-wrap">{chip_html}</div></div>'
                 )
-            html_parts.append(‘</div></div>’)
+            html_parts.append('</div></div>')
             with column:
-                st.markdown(‘’.join(html_parts), unsafe_allow_html=True)
+                st.markdown(''.join(html_parts), unsafe_allow_html=True)
 
 
 with pickleball_tab:
