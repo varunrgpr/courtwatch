@@ -36,7 +36,7 @@ Main pieces:
 - `app/schedule_context.py` — day-specific county schedule context used in the dashboard
 - `scripts/export_latest_dataset.py` — stable export files for downstream pull/upload flows
 
-## Nightly automation
+## Nightly automation on the VM
 
 Installed schedule:
 - daily at **1:00 AM America/Los_Angeles**
@@ -50,6 +50,26 @@ Machine-loaded copy:
 Logs:
 - `logs/nightly.stdout.log`
 - `logs/nightly.stderr.log`
+
+## Downstream Mac pull + publish flow
+
+This repo is the upstream capture/shaping layer.
+
+The downstream Mac host is responsible for:
+- pulling `exports/latest/*` from this VM
+- archiving the pulled snapshot locally
+- uploading the latest `availability.csv` to S3
+- serving the Streamlit Community Cloud app from the downstream GitHub repo
+
+Current downstream runtime details:
+- pull host latest snapshot: `/Users/beerus/court-watch-data/latest`
+- downstream active pipeline root: `/Users/beerus/court-watch-pipeline`
+- downstream nightly schedule: **10:00 PM America/New_York**
+- downstream S3 target: `s3://court-watch-data-arlington/availability.csv`
+
+This split matters:
+- this VM owns data capture and export shaping
+- the downstream Mac owns transfer, S3 publication, and the public app runtime
 
 ## Stable export path
 
@@ -68,6 +88,8 @@ Files:
 - `exports/latest/courts.csv`
 - `exports/latest/court_sports.csv`
 - `exports/latest/canonical_inventory.json`
+
+For the downstream hosted dashboard, `availability.csv` is the most important published artifact because it is what gets uploaded to S3 for Streamlit Community Cloud.
 
 ## Minimal pull set for another machine
 

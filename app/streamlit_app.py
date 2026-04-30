@@ -448,7 +448,6 @@ st.markdown(
 )
 
 st.title("Free Court Watcher")
-st.caption("GitHub-aligned local dev view for Arlington court availability and facility inventory")
 
 try:
     rows = get_rows()
