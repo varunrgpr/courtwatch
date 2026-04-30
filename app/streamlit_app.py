@@ -2,7 +2,6 @@ import csv
 import io
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 import re
 from zoneinfo import ZoneInfo
 
@@ -28,9 +27,6 @@ SCHEDULE_CONTEXT_ALIASES = {
 
 st.set_page_config(page_title="Free Court Watcher", layout="wide")
 
-ROOT = Path(__file__).resolve().parents[1]
-EXPORT_DIR = ROOT / "exports" / "latest"
-_LOCAL_AVAILABILITY_CSV = EXPORT_DIR / "availability.csv"
 _DEFAULT_BUCKET = "court-watch-data-arlington"
 _DEFAULT_KEY = "availability.csv"
 _DEFAULT_REGION = "us-west-2"
@@ -83,13 +79,6 @@ def _normalize_rows(rows: list[dict]) -> list[dict]:
     return normalized
 
 
-def _read_local_rows() -> list[dict]:
-    if not _LOCAL_AVAILABILITY_CSV.exists():
-        return []
-    rows = list(csv.DictReader(_LOCAL_AVAILABILITY_CSV.read_text(encoding="utf-8").splitlines()))
-    return _normalize_rows(rows)
-
-
 def _read_s3_rows() -> list[dict]:
     bucket, key, _ = _get_s3_config()
     response = _get_s3_client().get_object(Bucket=bucket, Key=key)
@@ -98,30 +87,11 @@ def _read_s3_rows() -> list[dict]:
     return _normalize_rows(rows)
 
 
-def _rows_freshness_key(rows: list[dict]) -> tuple[str, str]:
-    if not rows:
-        return ("", "")
-    max_date = max((row.get("date") or "" for row in rows), default="")
-    max_observed = max((row.get("observed_at") or "" for row in rows), default="")
-    return (max_date, max_observed)
-
-
 @st.cache_data(show_spinner=False, ttl=60)
 def get_rows() -> list[dict]:
-    local_rows = _read_local_rows()
-    local_key = _rows_freshness_key(local_rows)
-
-    try:
-        s3_rows = _read_s3_rows()
-    except Exception:
-        if local_rows:
-            return local_rows
-        raise
-
-    s3_key = _rows_freshness_key(s3_rows)
-    if s3_key > local_key:
-        return s3_rows
-    return local_rows or s3_rows
+    if boto3 is None:
+        raise RuntimeError("boto3 is not installed")
+    return _read_s3_rows()
 
 
 
@@ -451,10 +421,8 @@ st.title("Free Court Watcher")
 
 try:
     rows = get_rows()
-except (ClientError, BotoCoreError, KeyError, RuntimeError) as exc:
-    bucket, key, _ = _get_s3_config()
-    st.error(f"Could not load dashboard data from local exports or s3://{bucket}/{key}.")
-    st.caption("Local exports are preferred. If those are absent, check your Streamlit secrets and S3 upload.")
+except Exception as exc:
+    st.error("Unable to load court data. Please try again later.")
     st.exception(exc)
     st.stop()
 
