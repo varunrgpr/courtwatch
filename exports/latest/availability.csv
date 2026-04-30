@@ -1,0 +1,47 @@
+park,court,date,start,end,source_status,playable_status,observed_at,scrape_run_id,segments
+Fort Scott Park,Pickleball Court #1A,2026-04-26,14:30,15:30,unavailable,not_playable,2026-04-26 12:55:24.785412,6,1
+Fort Scott Park,Pickleball Court #1A,2026-04-26,12:00,14:30,open,playable,2026-04-26 12:55:24.785403,6,5
+Fort Scott Park,Pickleball Court #1A,2026-04-26,15:30,17:00,open,playable,2026-04-26 12:55:24.785436,6,3
+Fort Scott Park,Pickleball Court #1B,2026-04-26,12:00,16:00,open,playable,2026-04-26 12:55:24.786054,6,8
+Fort Scott Park,Pickleball Court #2A,2026-04-26,15:00,17:00,unavailable,not_playable,2026-04-26 12:55:24.785663,6,1
+Fort Scott Park,Pickleball Court #2A,2026-04-26,12:00,15:00,open,playable,2026-04-26 12:55:24.785656,6,6
+Fort Scott Park,Pickleball Court #2B,2026-04-26,15:00,17:00,unavailable,not_playable,2026-04-26 12:55:24.785844,6,1
+Fort Scott Park,Pickleball Court #2B,2026-04-26,12:00,15:00,open,playable,2026-04-26 12:55:24.785837,6,6
+Hayes Park,Pickleball Court #1A,2026-04-26,08:00,12:30,unavailable,not_playable,2026-04-26 12:55:24.786187,6,1
+Hayes Park,Pickleball Court #1A,2026-04-26,13:30,16:30,unavailable,not_playable,2026-04-26 12:55:24.786215,6,1
+Hayes Park,Pickleball Court #1A,2026-04-26,12:30,13:30,open,playable,2026-04-26 12:55:24.786207,6,2
+Hayes Park,Pickleball Court #1A,2026-04-26,16:30,17:00,open,playable,2026-04-26 12:55:24.786222,6,1
+Hayes Park,Pickleball Court #1B,2026-04-26,08:00,11:00,unavailable,not_playable,2026-04-26 12:55:24.786337,6,1
+Hayes Park,Pickleball Court #1B,2026-04-26,11:30,13:30,unavailable,not_playable,2026-04-26 12:55:24.786355,6,1
+Hayes Park,Pickleball Court #1B,2026-04-26,15:00,16:30,unavailable,not_playable,2026-04-26 12:55:24.786384,6,1
+Hayes Park,Pickleball Court #1B,2026-04-26,11:00,11:30,open,playable,2026-04-26 12:55:24.786347,6,1
+Hayes Park,Pickleball Court #1B,2026-04-26,13:30,15:00,open,playable,2026-04-26 12:55:24.786377,6,3
+Hayes Park,Pickleball Court #1B,2026-04-26,16:30,17:00,open,playable,2026-04-26 12:55:24.786391,6,1
+Hayes Park,Pickleball Court #2A,2026-04-26,08:00,11:30,unavailable,not_playable,2026-04-26 12:55:24.786541,6,1
+Hayes Park,Pickleball Court #2A,2026-04-26,12:00,13:30,unavailable,not_playable,2026-04-26 12:55:24.786560,6,1
+Hayes Park,Pickleball Court #2A,2026-04-26,14:00,16:30,unavailable,not_playable,2026-04-26 12:55:24.786574,6,1
+Hayes Park,Pickleball Court #2A,2026-04-26,11:30,12:00,open,playable,2026-04-26 12:55:24.786552,6,1
+Hayes Park,Pickleball Court #2A,2026-04-26,13:30,14:00,open,playable,2026-04-26 12:55:24.786567,6,1
+Hayes Park,Pickleball Court #2A,2026-04-26,16:30,17:00,open,playable,2026-04-26 12:55:24.786581,6,1
+Hayes Park,Pickleball Court #2B,2026-04-26,08:00,14:30,unavailable,not_playable,2026-04-26 12:55:24.786698,6,1
+Hayes Park,Pickleball Court #2B,2026-04-26,15:00,16:30,unavailable,not_playable,2026-04-26 12:55:24.786716,6,1
+Hayes Park,Pickleball Court #2B,2026-04-26,14:30,15:00,open,playable,2026-04-26 12:55:24.786708,6,1
+Hayes Park,Pickleball Court #2B,2026-04-26,16:30,17:00,open,playable,2026-04-26 12:55:24.786724,6,1
+Marcey Road Park,Pickleball Court #2A,2026-04-26,17:00,18:00,unavailable,not_playable,2026-04-26 12:55:24.786841,6,1
+Marcey Road Park,Pickleball Court #2A,2026-04-26,18:00,22:00,open,playable,2026-04-26 12:55:24.786902,6,8
+Marcey Road Park,Pickleball Court #2B,2026-04-26,17:00,18:00,unavailable,not_playable,2026-04-26 12:55:24.787015,6,1
+Marcey Road Park,Pickleball Court #2B,2026-04-26,18:00,22:00,open,playable,2026-04-26 12:55:24.787074,6,8
+Marcey Road Park,Pickleball Court #3A,2026-04-26,08:00,09:00,unavailable,not_playable,2026-04-26 12:55:24.787187,6,1
+Marcey Road Park,Pickleball Court #3A,2026-04-26,09:30,10:30,unavailable,not_playable,2026-04-26 12:55:24.787204,6,1
+Marcey Road Park,Pickleball Court #3A,2026-04-26,12:00,13:30,unavailable,not_playable,2026-04-26 12:55:24.787232,6,1
+Marcey Road Park,Pickleball Court #3A,2026-04-26,15:00,17:30,unavailable,not_playable,2026-04-26 12:55:24.787260,6,1
+Marcey Road Park,Pickleball Court #3A,2026-04-26,09:00,09:30,open,playable,2026-04-26 12:55:24.787197,6,1
+Marcey Road Park,Pickleball Court #3A,2026-04-26,10:30,12:00,open,playable,2026-04-26 12:55:24.787225,6,3
+Marcey Road Park,Pickleball Court #3A,2026-04-26,13:30,15:00,open,playable,2026-04-26 12:55:24.787253,6,3
+Marcey Road Park,Pickleball Court #3A,2026-04-26,17:30,18:00,open,playable,2026-04-26 12:55:24.787266,6,1
+Marcey Road Park,Pickleball Court #3B,2026-04-26,08:00,12:30,unavailable,not_playable,2026-04-26 12:55:24.787377,6,1
+Marcey Road Park,Pickleball Court #3B,2026-04-26,14:00,15:30,unavailable,not_playable,2026-04-26 12:55:24.787410,6,1
+Marcey Road Park,Pickleball Court #3B,2026-04-26,16:00,17:30,unavailable,not_playable,2026-04-26 12:55:24.787424,6,1
+Marcey Road Park,Pickleball Court #3B,2026-04-26,12:30,14:00,open,playable,2026-04-26 12:55:24.787403,6,3
+Marcey Road Park,Pickleball Court #3B,2026-04-26,15:30,16:00,open,playable,2026-04-26 12:55:24.787417,6,1
+Marcey Road Park,Pickleball Court #3B,2026-04-26,17:30,19:30,open,playable,2026-04-26 12:55:24.787451,6,4

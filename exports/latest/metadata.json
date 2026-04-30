@@ -1,0 +1,9 @@
+{
+  "generated_at": "2026-04-27T02:42:09.554565+00:00",
+  "row_count": 46,
+  "files": {
+    "db": "/Users/beerus/Desktop/court-watch-app/court_watch.db",
+    "csv": "/Users/beerus/Desktop/court-watch-app/exports/latest/availability.csv",
+    "json": "/Users/beerus/Desktop/court-watch-app/exports/latest/availability.json"
+  }
+}

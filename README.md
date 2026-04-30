@@ -61,6 +61,32 @@ Files:
 - `exports/latest/availability.csv`
 - `exports/latest/availability.json`
 - `exports/latest/metadata.json`
+- `exports/latest/facilities.csv`
+- `exports/latest/facilities.json`
+- `exports/latest/parks.json`
+- `exports/latest/locations.csv`
+- `exports/latest/courts.csv`
+- `exports/latest/court_sports.csv`
+- `exports/latest/canonical_inventory.json`
+
+## Minimal pull set for another machine
+
+If another machine only needs the shaped data and dashboard layer, pull these:
+
+### Data
+- `exports/latest/availability.csv`
+- `exports/latest/availability.json`
+- `exports/latest/metadata.json`
+- `exports/latest/canonical_inventory.json`
+- `exports/latest/locations.csv`
+- `exports/latest/courts.csv`
+- `exports/latest/court_sports.csv`
+
+### Dashboard code
+- `app/streamlit_app.py`
+- `app/schedule_context.py`
+
+That is the current clean boundary between this VM’s role (capture + shape data) and a downstream machine’s role (pull + render/upload).
 
 Refresh it manually with:
 
