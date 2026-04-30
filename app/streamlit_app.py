@@ -1,6 +1,5 @@
 import csv
 import io
-import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +31,6 @@ st.set_page_config(page_title="Free Court Watcher", layout="wide")
 ROOT = Path(__file__).resolve().parents[1]
 EXPORT_DIR = ROOT / "exports" / "latest"
 _LOCAL_AVAILABILITY_CSV = EXPORT_DIR / "availability.csv"
-_LOCAL_CANONICAL_INVENTORY_JSON = EXPORT_DIR / "canonical_inventory.json"
 _DEFAULT_BUCKET = "court-watch-data-arlington"
 _DEFAULT_KEY = "availability.csv"
 _DEFAULT_REGION = "us-west-2"
@@ -97,12 +95,6 @@ def get_rows() -> list[dict]:
     rows = list(csv.DictReader(io.StringIO(body)))
     return _normalize_rows(rows)
 
-
-@st.cache_data(show_spinner=False, ttl=60)
-def get_inventory() -> dict:
-    if not _LOCAL_CANONICAL_INVENTORY_JSON.exists():
-        return {"locations": [], "courts": [], "court_sports": []}
-    return json.loads(_LOCAL_CANONICAL_INVENTORY_JSON.read_text(encoding="utf-8"))
 
 
 def _format_time_12h(time_str: str) -> str:
@@ -386,16 +378,6 @@ def _sport_for_row(row: dict) -> str:
     return "unknown"
 
 
-def _health_summary(locations: list[dict], ambiguities: list[dict]) -> dict:
-    return {
-        "ambiguity_count": len(ambiguities),
-        "unknown_indoor_outdoor": sum(1 for row in locations if row.get("indoor_outdoor") in {None, "unknown"}),
-        "unverified_codes": sum(1 for row in locations if row.get("source_location_code_confidence") != "high"),
-        "alias_count": sum(1 for row in locations if row.get("aliases")),
-        "needs_review": sum(1 for row in locations if "needs_review" in row.get("issue_flags", [])),
-        "schedule_context_linked": sum(1 for row in locations if row.get("schedule_context_name")),
-    }
-
 
 st.markdown(
     """
@@ -430,9 +412,6 @@ st.markdown(
       .cw-bucket-park { font-weight: 700; color: #0f172a; margin-bottom: 4px; }
       .cw-bucket-meta { color: #15803d; font-size: 0.82rem; margin-bottom: 4px; }
       .cw-bucket-windows { color: #475569; font-size: 0.88rem; line-height: 1.4; }
-      .cw-inventory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
-      .cw-inventory-card { border: 1px solid #dbe7f5; border-radius: 18px; padding: 16px; background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04); }
-      .cw-inventory-title { font-size: 1rem; font-weight: 800; color: #0f172a; margin-bottom: 8px; }
       .cw-small { color: #64748b; font-size: 0.86rem; }
       @media (max-width: 900px) { .cw-card { padding: 16px; border-radius: 18px; } .cw-court-grid { grid-template-columns: 1fr; } }
     </style>
@@ -452,267 +431,125 @@ except (ClientError, BotoCoreError, KeyError, RuntimeError) as exc:
     st.exception(exc)
     st.stop()
 
-inventory = get_inventory()
-
 if not rows:
     st.warning("No stored snapshot yet. Export the latest availability CSV first.")
     st.stop()
 
-availability_tab, inventory_tab, health_tab = st.tabs(["Availability", "Inventory", "Dataset Health"])
+available_dates = sorted({row["date"] for row in rows if row.get("date")})
+selected_date = st.selectbox("Date", available_dates, index=len(available_dates) - 1) if available_dates else None
+date_rows = [row for row in rows if row.get("date") == selected_date] if selected_date else rows
 
-with availability_tab:
-    available_dates = sorted({row["date"] for row in rows if row.get("date")})
-    selected_date = st.selectbox("Date", available_dates, index=len(available_dates) - 1) if available_dates else None
-    date_rows = [row for row in rows if row.get("date") == selected_date] if selected_date else rows
+parks = sorted({row["park"] for row in date_rows if row.get("park")})
+preferred = {"Fort Scott Park", "Hayes Park"}
+default_parks = [p for p in parks if p in preferred] or parks
+if "selected_parks" not in st.session_state:
+    st.session_state["selected_parks"] = default_parks
+selected_parks = st.multiselect("Parks", parks, key="selected_parks")
+show_unplayable = st.toggle("Include not-reservable windows", value=True)
+if "selected_time_blocks" not in st.session_state:
+    st.session_state["selected_time_blocks"] = DEFAULT_TIME_BLOCK_OPTIONS
+selected_time_blocks = st.multiselect("Time blocks", TIME_BLOCK_OPTIONS, key="selected_time_blocks")
 
-    parks = sorted({row["park"] for row in date_rows if row.get("park")})
-    preferred = {"Fort Scott Park", "Hayes Park"}
-    default_parks = [p for p in parks if p in preferred] or parks
-    if "selected_parks" not in st.session_state:
-        st.session_state["selected_parks"] = default_parks
-    selected_parks = st.multiselect("Parks", parks, key="selected_parks")
-    show_unplayable = st.toggle("Include not-reservable windows", value=True)
-    if "selected_time_blocks" not in st.session_state:
-        st.session_state["selected_time_blocks"] = DEFAULT_TIME_BLOCK_OPTIONS
-    selected_time_blocks = st.multiselect("Time blocks", TIME_BLOCK_OPTIONS, key="selected_time_blocks")
+filtered = [row for row in date_rows if row.get("park") in selected_parks]
+playable_rows = [row for row in filtered if row.get("playable_status") == "playable"]
+visible_rows = filtered if show_unplayable else playable_rows
+last_updated = max((row.get("observed_at") for row in filtered if row.get("observed_at")), default="—")
+enriched_rows = _build_enriched_rows(filtered, selected_date or "")
 
-    filtered = [row for row in date_rows if row.get("park") in selected_parks]
-    playable_rows = [row for row in filtered if row.get("playable_status") == "playable"]
-    visible_rows = filtered if show_unplayable else playable_rows
-    last_updated = max((row.get("observed_at") for row in filtered if row.get("observed_at")), default="—")
-    enriched_rows = _build_enriched_rows(filtered, selected_date or "")
+st.caption(f"Last refreshed: {format_timestamp(last_updated)}")
 
-    st.caption(f"Last refreshed: {format_timestamp(last_updated)}")
+pickleball_rows = [row for row in visible_rows if _sport_for_row(row) == "pickleball"]
+tennis_rows = [row for row in visible_rows if _sport_for_row(row) == "tennis"]
+pickleball_enriched = [row for row in enriched_rows if _sport_for_row(row) == "pickleball"]
+tennis_enriched = [row for row in enriched_rows if _sport_for_row(row) == "tennis"]
 
-    pickleball_rows = [row for row in visible_rows if _sport_for_row(row) == "pickleball"]
-    tennis_rows = [row for row in visible_rows if _sport_for_row(row) == "tennis"]
-    pickleball_enriched = [row for row in enriched_rows if _sport_for_row(row) == "pickleball"]
-    tennis_enriched = [row for row in enriched_rows if _sport_for_row(row) == "tennis"]
+pickleball_tab, tennis_tab = st.tabs(["Pickleball", "Tennis"])
 
-    pickleball_tab, tennis_tab = st.tabs(["Pickleball", "Tennis"])
 
-    def render_sport_tab(label: str, sport_rows: list[dict], sport_enriched_rows: list[dict]) -> None:
-        grouped = group_by_park_and_court(sport_rows)
-        st.subheader(f"Best Times To Play — {label}")
-        time_buckets = _build_time_buckets(sport_enriched_rows)
-        if selected_time_blocks:
-            time_buckets = [bucket for bucket in time_buckets if bucket["label"] in selected_time_blocks]
-        bucket_cards: list[str] = ['<div class="cw-bucket-grid">']
-        for bucket in time_buckets:
-            body = '<div class="cw-empty">No free courts in this time block.</div>'
-            if bucket["entries"]:
-                entry_html = []
-                for entry in bucket["entries"]:
-                    windows_html = "<br>".join(entry["windows"])
-                    entry_html.append(
-                        f'<div class="cw-bucket-entry"><div class="cw-bucket-park">{entry["park"]} '
-                        f'<span style="color:#15803d;font-weight:600;font-size:0.85rem">{entry["avail_pct"]}% free</span></div>'
-                        f'<div class="cw-bucket-meta">{entry["court_count"]} court{"s" if entry["court_count"] != 1 else ""} free in this block</div>'
-                        f'<div class="cw-bucket-windows">{windows_html}</div></div>'
-                    )
-                body = "".join(entry_html)
-            bucket_cards.append(f'<div class="cw-bucket-card"><div class="cw-bucket-title">{bucket["label"]}</div>{body}</div>')
-        bucket_cards.append("</div>")
-        st.markdown("".join(bucket_cards), unsafe_allow_html=True)
+def render_sport_tab(label: str, sport_rows: list[dict], sport_enriched_rows: list[dict]) -> None:
+    grouped = group_by_park_and_court(sport_rows)
+    st.subheader(f"Best Times To Play — {label}")
+    time_buckets = _build_time_buckets(sport_enriched_rows)
+    if selected_time_blocks:
+        time_buckets = [bucket for bucket in time_buckets if bucket["label"] in selected_time_blocks]
+    bucket_cards: list[str] = [‘<div class="cw-bucket-grid">’]
+    for bucket in time_buckets:
+        body = ‘<div class="cw-empty">No free courts in this time block.</div>’
+        if bucket["entries"]:
+            entry_html = []
+            for entry in bucket["entries"]:
+                windows_html = "<br>".join(entry["windows"])
+                entry_html.append(
+                    f’<div class="cw-bucket-entry"><div class="cw-bucket-park">{entry["park"]} ‘
+                    f’<span style="color:#15803d;font-weight:600;font-size:0.85rem">{entry["avail_pct"]}% free</span></div>’
+                    f’<div class="cw-bucket-meta">{entry["court_count"]} court{"s" if entry["court_count"] != 1 else ""} free in this block</div>’
+                    f’<div class="cw-bucket-windows">{windows_html}</div></div>’
+                )
+            body = "".join(entry_html)
+        bucket_cards.append(f’<div class="cw-bucket-card"><div class="cw-bucket-title">{bucket["label"]}</div>{body}</div>’)
+    bucket_cards.append("</div>")
+    st.markdown("".join(bucket_cards), unsafe_allow_html=True)
 
-        with st.expander(f"Detailed by park and court — {label}", expanded=False):
-            visible_parks = [park for park in selected_parks if park in grouped]
-            park_columns = st.columns(len(visible_parks)) if visible_parks else []
-            for column, park in zip(park_columns, visible_parks):
-                summary, day_notes = get_schedule_context(park, selected_date or "")
-                context_html = ""
-                if summary or day_notes:
-                    note_items = ''.join(f'<li>{note}</li>' for note in day_notes)
-                    notes_html = f'<ul>{note_items}</ul>' if note_items else ''
-                    summary_html = f'<div class="cw-context-copy">{summary}</div>' if summary else ''
-                    context_html = f'<div class="cw-context"><div class="cw-context-title">Today’s court-use context</div>{summary_html}{notes_html}</div>'
-                html_parts = [f'<div class="cw-card"><div class="cw-park">{park}</div>{context_html}<div class="cw-court-grid">']
-                for court in sorted(grouped[park].keys()):
-                    court_rows = sorted(grouped[park][court], key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])))
-                    gap_rows = _fill_operating_hours_gaps(court_rows)
-                    schedule_adjusted_rows = _apply_schedule_open_play(court_rows + gap_rows, park, selected_date or "", court)
-                    all_court_rows = sorted(schedule_adjusted_rows, key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])))
-                    playable_count = sum(1 for r in all_court_rows if r["playable_status"] == "playable")
-                    display_rows = all_court_rows if show_unplayable else [r for r in all_court_rows if r["playable_status"] == "playable"]
-                    chips: list[str] = []
-                    for row in display_rows:
-                        cls = "cw-chip" if row["playable_status"] == "playable" else "cw-chip cw-chip-muted"
-                        label2 = f'{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}'
-                        if row.get("segments", 1) > 1:
-                            label2 += f' · {row["segments"]} slots'
-                        if row.get("source_status") in {"drop_in_open_play", "scheduled_open_play"}:
-                            label2 += " · open play"
-                        elif row["playable_status"] != "playable":
-                            label2 += " · not reservable"
-                        chips.append(f'<span class="{cls}">{label2}</span>')
-                    status_html = '' if playable_count else '<span class="cw-status cw-status-muted">No Availability</span>'
-                    chip_html = ''.join(chips) if chips else '<div class="cw-empty">No time slots to display</div>'
-                    html_parts.append(
-                        f'<div class="cw-court-card"><div class="cw-court-card-head"><div><div class="cw-court">{court}</div></div>{status_html}</div><div class="cw-chip-wrap">{chip_html}</div></div>'
-                    )
-                html_parts.append('</div></div>')
-                with column:
-                    st.markdown(''.join(html_parts), unsafe_allow_html=True)
+    with st.expander(f"Detailed by park and court — {label}", expanded=False):
+        visible_parks = [park for park in selected_parks if park in grouped]
+        park_columns = st.columns(len(visible_parks)) if visible_parks else []
+        for column, park in zip(park_columns, visible_parks):
+            summary, day_notes = get_schedule_context(park, selected_date or "")
+            context_html = ""
+            if summary or day_notes:
+                note_items = ‘’.join(f’<li>{note}</li>’ for note in day_notes)
+                notes_html = f’<ul>{note_items}</ul>’ if note_items else ‘’
+                summary_html = f’<div class="cw-context-copy">{summary}</div>’ if summary else ‘’
+                context_html = f’<div class="cw-context"><div class="cw-context-title">Today’s court-use context</div>{summary_html}{notes_html}</div>’
+            html_parts = [f’<div class="cw-card"><div class="cw-park">{park}</div>{context_html}<div class="cw-court-grid">’]
+            for court in sorted(grouped[park].keys()):
+                court_rows = sorted(grouped[park][court], key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])))
+                gap_rows = _fill_operating_hours_gaps(court_rows)
+                schedule_adjusted_rows = _apply_schedule_open_play(court_rows + gap_rows, park, selected_date or "", court)
+                all_court_rows = sorted(schedule_adjusted_rows, key=lambda row: (_time_to_minutes(row["start"]), _time_to_minutes(row["end"])))
+                playable_count = sum(1 for r in all_court_rows if r["playable_status"] == "playable")
+                display_rows = all_court_rows if show_unplayable else [r for r in all_court_rows if r["playable_status"] == "playable"]
+                chips: list[str] = []
+                for row in display_rows:
+                    cls = "cw-chip" if row["playable_status"] == "playable" else "cw-chip cw-chip-muted"
+                    label2 = f’{_format_time_12h(row["start"])} – {_format_time_12h(row["end"])}’
+                    if row.get("segments", 1) > 1:
+                        label2 += f’ · {row["segments"]} slots’
+                    if row.get("source_status") in {"drop_in_open_play", "scheduled_open_play"}:
+                        label2 += " · open play"
+                    elif row["playable_status"] != "playable":
+                        label2 += " · not reservable"
+                    chips.append(f’<span class="{cls}">{label2}</span>’)
+                status_html = ‘’ if playable_count else ‘<span class="cw-status cw-status-muted">No Availability</span>’
+                chip_html = ‘’.join(chips) if chips else ‘<div class="cw-empty">No time slots to display</div>’
+                html_parts.append(
+                    f’<div class="cw-court-card"><div class="cw-court-card-head"><div><div class="cw-court">{court}</div></div>{status_html}</div><div class="cw-chip-wrap">{chip_html}</div></div>’
+                )
+            html_parts.append(‘</div></div>’)
+            with column:
+                st.markdown(‘’.join(html_parts), unsafe_allow_html=True)
 
-    with pickleball_tab:
-        render_sport_tab("Pickleball", pickleball_rows, pickleball_enriched)
-    with tennis_tab:
-        render_sport_tab("Tennis", tennis_rows, tennis_enriched)
 
-    with st.expander("Raw merged rows"):
-        st.dataframe(
-            [
-                {
-                    "park": row["park"],
-                    "court": row["court"],
-                    "date": row["date"],
-                    "start": _format_time_12h(row["start"]),
-                    "end": _format_time_12h(row["end"]),
-                    "source_status": row["source_status"],
-                    "playable_status": row["playable_status"],
-                    "merged_segments": row.get("segments", 1),
-                }
-                for row in visible_rows
-            ],
-            width="stretch",
-            hide_index=True,
-        )
+with pickleball_tab:
+    render_sport_tab("Pickleball", pickleball_rows, pickleball_enriched)
+with tennis_tab:
+    render_sport_tab("Tennis", tennis_rows, tennis_enriched)
 
-with inventory_tab:
-    locations = inventory.get("locations", [])
-    courts = inventory.get("courts", [])
-    court_sports = inventory.get("court_sports", [])
-    ambiguities = inventory.get("ambiguities", [])
-
-    st.subheader("Facility Inventory")
-    st.caption("Canonical inventory exported from the recovered batched county search.")
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Locations", len(locations))
-    col2.metric("Courts", len(courts))
-    col3.metric("Sport mappings", len(court_sports))
-    col4.metric("Ambiguities", len(ambiguities))
-
-    st.caption(f"Last seen: {format_timestamp(inventory.get('captured_at', '—'))}")
-
-    sports_filter_options = sorted({sport for location in locations for sport in location.get("sports_present", [])})
-    selected_sports = st.multiselect("Filter by sport", sports_filter_options, default=sports_filter_options)
-    only_ambiguous = st.toggle("Show only locations with metadata issues", value=False)
-
-    inventory_rows = []
-    courts_by_location: dict[str, list[dict]] = defaultdict(list)
-    for court in courts:
-        courts_by_location[court.get("location_id")].append(court)
-
-    ambiguity_by_location = {row.get("location"): row for row in ambiguities}
-
-    for location in locations:
-        location_sports = location.get("sports_present", [])
-        if selected_sports and not any(sport in selected_sports for sport in location_sports):
-            continue
-        if only_ambiguous and location.get("name") not in ambiguity_by_location:
-            continue
-        inventory_rows.append(
+with st.expander("Raw merged rows"):
+    st.dataframe(
+        [
             {
-                "park": location.get("name"),
-                "sports": ", ".join(location_sports) or "unknown",
-                "court_count": location.get("court_count"),
-                "source_location_code": location.get("source_location_code") or "—",
-                "code_confidence": location.get("source_location_code_confidence") or "—",
-                "indoor_outdoor": location.get("indoor_outdoor"),
-                "confidence": location.get("indoor_outdoor_confidence"),
-                "issue": (ambiguity_by_location.get(location.get("name")) or {}).get("issue", ""),
-                "aliases": ", ".join(location.get("aliases", [])),
-                "flags": ", ".join(location.get("issue_flags", [])),
-                "schedule_context_name": location.get("schedule_context_name") or "—",
-                "courts": ", ".join(court.get("name", "") for court in sorted(courts_by_location[location.get("location_id")], key=lambda c: c.get("name", ""))),
+                "park": row["park"],
+                "court": row["court"],
+                "date": row["date"],
+                "start": _format_time_12h(row["start"]),
+                "end": _format_time_12h(row["end"]),
+                "source_status": row["source_status"],
+                "playable_status": row["playable_status"],
+                "merged_segments": row.get("segments", 1),
             }
-        )
-
-    top_cards = ['<div class="cw-inventory-grid">']
-    visible_locations = [row for row in locations if any(entry["park"] == row.get("name") for entry in inventory_rows)]
-    for location in sorted(visible_locations, key=lambda row: row.get("name", "")):
-        location_id = location.get("location_id")
-        location_courts = sorted(courts_by_location[location_id], key=lambda c: c.get("name", ""))
-        court_names = "<br>".join(court.get("name", "") for court in location_courts) or "No courts listed"
-        sports = ", ".join(location.get("sports_present", [])) or "unknown"
-        ambiguity = ambiguity_by_location.get(location.get("name"))
-        issue_html = ""
-        if ambiguity:
-            issue_html = f'<div class="cw-small" style="margin-top:8px;color:#b45309">Issue: {ambiguity.get("issue")}</div>'
-        alias_html = ""
-        if location.get("aliases"):
-            alias_html = f'<div class="cw-small">Aliases: {", ".join(location.get("aliases", []))}</div>'
-        flags_html = ""
-        if location.get("issue_flags"):
-            flags_html = f'<div class="cw-small">Flags: {", ".join(location.get("issue_flags", []))}</div>'
-        context_html = ""
-        if location.get("schedule_context_name"):
-            context_html = f'<div class="cw-small">Schedule context: {location.get("schedule_context_name")}</div>'
-        top_cards.append(
-            f'<div class="cw-inventory-card"><div class="cw-inventory-title">{location.get("name")}</div>'
-            f'<div class="cw-small">Sports: {sports}</div>'
-            f'<div class="cw-small">Source code: {location.get("source_location_code") or "—"} ({location.get("source_location_code_confidence") or "—"})</div>'
-            f'<div class="cw-small">Courts: {location.get("court_count")}</div>'
-            f'<div class="cw-small">Indoor/outdoor: {location.get("indoor_outdoor")} ({location.get("indoor_outdoor_confidence")})</div>'
-            f'{context_html}'
-            f'{alias_html}'
-            f'{flags_html}'
-            f'{issue_html}'
-            f'<div style="margin-top:10px; color:#334155; font-size:0.9rem; line-height:1.45">{court_names}</div></div>'
-        )
-    top_cards.append("</div>")
-    st.markdown("".join(top_cards), unsafe_allow_html=True)
-
-    with st.expander("Inventory table"):
-        st.dataframe(inventory_rows, width="stretch", hide_index=True)
-
-with health_tab:
-    locations = inventory.get("locations", [])
-    ambiguities = inventory.get("ambiguities", [])
-    summary = _health_summary(locations, ambiguities)
-
-    st.subheader("Dataset Health")
-    st.caption("Use this view to spot unresolved metadata, naming issues, and lower-confidence inferences.")
-
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Ambiguities", summary["ambiguity_count"])
-    c2.metric("Unknown indoor/outdoor", summary["unknown_indoor_outdoor"])
-    c3.metric("Unverified source codes", summary["unverified_codes"])
-    c4.metric("Locations with aliases", summary["alias_count"])
-    c5.metric("Needs review", summary["needs_review"])
-    c6.metric("Schedule context linked", summary["schedule_context_linked"])
-
-    ambiguous_locations = [
-        {
-            "location": row.get("location"),
-            "issue": row.get("issue"),
-            "source_location_code": row.get("source_location_code"),
-            "confidence": row.get("confidence"),
-            "issue_flags": ", ".join(row.get("issue_flags", [])) if isinstance(row.get("issue_flags"), list) else row.get("issue_flags", ""),
-        }
-        for row in ambiguities
-    ]
-
-    unknown_rows = [
-        {
-            "location": row.get("name"),
-            "source_location_code": row.get("source_location_code") or "—",
-            "code_confidence": row.get("source_location_code_confidence") or "—",
-            "indoor_outdoor": row.get("indoor_outdoor") or "—",
-            "aliases": ", ".join(row.get("aliases", [])),
-            "schedule_context_name": row.get("schedule_context_name") or "—",
-            "flags": ", ".join(row.get("issue_flags", [])),
-            "notes": row.get("notes") or "",
-        }
-        for row in locations
-        if row.get("issue_flags")
-    ]
-
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**Ambiguity list**")
-        st.dataframe(ambiguous_locations or [], width="stretch", hide_index=True)
-    with right:
-        st.markdown("**Locations needing metadata review**")
-        st.dataframe(unknown_rows or [], width="stretch", hide_index=True)
+            for row in visible_rows
+        ],
+        width="stretch",
+        hide_index=True,
+    )
